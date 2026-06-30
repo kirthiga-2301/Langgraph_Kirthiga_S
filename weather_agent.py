@@ -55,43 +55,22 @@ class State(TypedDict):
     messages: Annotated[list,operator.add]
 
 system = SystemMessage(
-"""
-You are a helpful assistant.
-Only answer weather and time questions.
-Available tools:
-get_weather
-get_time
-Use only one required tool.
-After tool result, give final answer.
-Do not call another tool.
-"""
+"""You are Weather & Time agent. Your ONLY job is to help users with weather forecasts, current conditions, and time zone information.
+CRITICAL RULES:
+1. ONLY predict weather and time.
+2. If the user asks ANY question unrelated to weather or time, you MUST NOT answer it. Instead, you MUST reply EXACTLY with: "I don't know. I can only help with weather and time."
+3. Always use the appropriate tool whenever possible to get accurate data.
+4. Never guess or hallucinate weather or time data if a tool exists.
+5. Always explain the tool result in simple English (e.g., recommend an umbrella if it's raining)."""
 )
 
 def assistant(state):
     messages=[system]+state["messages"]
-    print("\n[LLM Request]")
-    for m in messages:
-        print(
-            m.type,
-            ":",
-            m.content
-        )
 
     last = state["messages"][-1]
     active_llm = llm_no_tools if isinstance(last, ToolMessage) else llm
 
     response = active_llm.invoke(messages)
-    print("\n[LLM Response]")
-
-    if response.tool_calls:
-        print(
-            "Tool:",
-            response.tool_calls
-        )
-    else:
-        print(
-            response.content
-        )
 
     return {
         "messages":[response]
@@ -100,21 +79,12 @@ def assistant(state):
 def tools_node(state):
     last=state["messages"][-1]
     output=[]
-    print("\n[Tools]")
 
     for call in last.tool_calls:
         name=call["name"]
         args=call["args"]
-        print(
-            "Running:",
-            name
-        )
 
         result=tool_map[name].invoke(args)
-        print(
-            "Result:",
-            result
-        )
 
         output.append(
             ToolMessage(
@@ -134,30 +104,11 @@ def router(state):
     return END
 
 graph=StateGraph(State)
-graph.add_node(
-    "assistant",
-    assistant
-)
-graph.add_node(
-    "tools",
-    tools_node
-)
-graph.add_edge(
-    START,
-    "assistant"
-)
-graph.add_conditional_edges(
-    "assistant",
-    router,
-    {
-        "tools":"tools",
-        END:END
-    }
-)
-graph.add_edge(
-    "tools",
-    "assistant"
-)
+graph.add_node("assistant",assistant)
+graph.add_node("tools",tools_node)
+graph.add_edge(START,"assistant")
+graph.add_conditional_edges("assistant",router,{ "tools":"tools", END:END })
+graph.add_edge("tools","assistant")
 agent=graph.compile()
 
 print("\n=== LangGraph trace (Weather & Time) ===")
@@ -177,7 +128,4 @@ while True:
             ]
         }
     )
-    print(
-        "\nAgent:",
-        result["messages"][-1].content
-    )
+    print("\nAgent:",result["messages"][-1].content)
